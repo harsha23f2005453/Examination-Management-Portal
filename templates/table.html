@@ -1,0 +1,11 @@
+{% extends 'base.html' %}{% block c %}
+<div class="d-flex justify-content-between align-items-center mb-3"><h3>{{title}}</h3><div>{% for l,u in top %}<a class="btn btn-primary btn-sm ms-1" href="{{u}}">{{l}}</a>{% endfor %}</div></div>
+{% if cards %}<div class="row mb-4">{% for l,v in cards %}<div class="col-6 col-md-3 mb-3"><div class="card text-center"><div class="card-body"><div class="display-6">{{v}}</div><div class="text-muted">{{l}}</div></div></div></div>{% endfor %}</div>{% endif %}
+{% if search is not none %}<form action="{{su}}" class="d-flex gap-2 mb-3"><input name="q" value="{{search}}" class="form-control" placeholder="Search by name or ID">
+{% if sel %}<select name="{{sel[0]}}" class="form-select w-auto"><option value="">All types</option>{% for o in sel[2] %}<option {{'selected' if o==sel[1]}}>{{o}}</option>{% endfor %}</select>{% endif %}<button class="btn btn-outline-primary">Search</button></form>{% endif %}
+{% for t in tables %}{% if t.title %}<h5 class="mt-4">{{t.title}}</h5>{% endif %}
+<div class="table-responsive"><table class="table table-striped table-sm align-middle bg-white"><thead><tr>{% for h in t.headers %}<th>{{h}}</th>{% endfor %}<th></th></tr></thead><tbody>
+{% for r in t.rows %}<tr>{% for c in r.cells %}<td>{{c if c is not none else ''}}</td>{% endfor %}<td class="text-end text-nowrap">
+{% for a in r.actions %}{% if a[3]=='get' %}<a class="btn btn-outline-secondary btn-sm" href="{{a[1]}}">{{a[0]}}</a>
+{% else %}<form method="post" action="{{a[1]}}" class="d-inline" {% if a[2]=='danger' %}onsubmit="return confirm('Are you sure?')"{% endif %}><button class="btn btn-outline-{{a[2]}} btn-sm">{{a[0]}}</button></form>{% endif %} {% endfor %}</td></tr>
+{% else %}<tr><td colspan="{{t.headers|length+1}}" class="text-muted">Nothing to show</td></tr>{% endfor %}</tbody></table></div>{% endfor %}{% endblock %}

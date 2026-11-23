@@ -1,0 +1,10 @@
+# SQLite runtime database
+emp.db
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/

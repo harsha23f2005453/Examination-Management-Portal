@@ -1,0 +1,7 @@
+{% extends 'base.html' %}{% block c %}<h3>{{title}}</h3>
+<form method="post" class="card card-body" style="max-width:640px">
+{% for f in fields %}<div class="mb-3"><label class="form-label">{{f.label}}</label>
+{% if f.type=='select' %}<select name="{{f.name}}" class="form-select">{% for v,t in f.options %}<option value="{{v}}" {{'selected' if v|string==f.value|string}}>{{t}}</option>{% endfor %}</select>
+{% elif f.type=='textarea' %}<textarea name="{{f.name}}" class="form-control" rows="3">{{f.value}}</textarea>
+{% else %}<input type="{{f.type}}" name="{{f.name}}" value="{{f.value}}" class="form-control" required {{f.extra}}>{% endif %}</div>{% endfor %}
+<button class="btn btn-primary">{{btn or 'Save'}}</button></form>{% endblock %}
