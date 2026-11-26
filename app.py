@@ -94,10 +94,12 @@ def delete(table, i):
     return redirect(request.referrer or url_for('home'))
 
 # ---------- auth ----------
+# Redirect an authenticated user to their role dashboard or show the login page.
 @app.route('/')
 def home():
     u = cur()
     return redirect(url_for(u['role'] + '_home') if u else url_for('login'))
+# Authenticate a user and create a session for their account.
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -105,7 +107,8 @@ def login():
         if u and cph(u['password'], request.form['password']) and u['status'] != 'inactive':
             session.clear(); session['uid'] = u['id']; return redirect(url_for('home'))
         flash('Invalid credentials or deactivated account', 'danger')
-    return rt('form.html', title='Login', btn='Login', fields=F([('email', 'Email', 'email', None), ('password', 'Password', 'password', None)]))
+    return rt('form.html', auth=True, title='Login', btn='Login', fields=F([('email', 'Email', 'email', None), ('password', 'Password', 'password', None)]))
+# End the current session and return to the login page.
 @app.route('/logout')
 def logout():
     session.clear(); return redirect(url_for('login'))
@@ -117,6 +120,7 @@ def make_user(f, r, status):
     except sqlite3.IntegrityError: return 'Email already registered'
 UF = [('name', 'Full name', 'text', None), ('email', 'Email', 'email', None), ('phone', 'Phone', 'text', None),
       ('department', 'Department', 'text', None), ('ref_no', 'Student ID / Employee ID', 'text', None), ('password', 'Password (min 6)', 'password', None)]
+# Register a new student or examiner account.
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     spec = [('role', 'Register as', 'select', [('student', 'Student'), ('examiner', 'Examiner')])] + UF
@@ -127,6 +131,7 @@ def register():
         else:
             flash('Registered! ' + ('Await admin approval.' if r == 'examiner' else 'Please log in.'), 'success'); return redirect(url_for('login'))
     return rt('form.html', title='Register', btn='Register', fields=F(spec))
+# Allow a student or examiner to view and edit profile details.
 @app.route('/profile', methods=['GET', 'POST'])
 @role('student', 'examiner')
 def profile():
@@ -135,6 +140,7 @@ def profile():
     return form('Edit profile', spec, url_for('home'), 'users', u['id'], row=u)
 
 # ---------- admin ----------
+# Display totals and pending-work summaries for the admin dashboard.
 @app.route('/admin')
 @role('admin')
 def admin_home():
@@ -143,6 +149,7 @@ def admin_home():
              ('Slots', n('select count(*) from slots')), ('Bookings', n('select count(*) from bookings')),
              ('Pending examiners', n("select count(*) from users where status='pending'"))]
     return page('Admin Dashboard', cards=cards, search='', su=url_for('admin_search'))
+# Search students, examiners, examinations, and bookings.
 @app.route('/admin/search')
 @role('admin')
 def admin_search():
@@ -154,21 +161,25 @@ def admin_search():
     return page(f'Search: {s}', [T('Students', h, us('student')), T('Examiners', h, us('examiner')),
                 T('Examinations', ['ID', 'Name', 'Type', 'Status'], ex), T('Bookings', ['ID', 'Student', 'Exam', 'Date', 'Status'], bk)], search=s, su=url_for('admin_search'))
 
+# List every course and provide add, edit, and delete actions.
 @app.route('/admin/courses')
 @role('admin')
 def courses():
     rows = [R([c['id'], c['code'], c['name'], c['status']], A('Edit', url_for('course_edit', i=c['id']), get=True), A('Delete', url_for('course_del', i=c['id']), 'danger')) for c in q('select * from courses')]
     return page('Courses', [T('', ['ID', 'Code', 'Name', 'Status'], rows)], top=[('Add course', url_for('course_edit', i=0))])
+# Create or edit a course record.
 @app.route('/admin/courses/<int:i>/edit', methods=['GET', 'POST'])
 @role('admin')
 def course_edit(i):
     spec = [('code', 'Course code', 'text', None), ('name', 'Course name', 'text', None), ('description', 'Description', 'textarea', None),
             ('status', 'Status', 'select', [('Active', 'Active'), ('Inactive', 'Inactive')])]
     return form('Course', spec, url_for('courses'), 'courses', i, row=q('select * from courses where id=?', (i,), one=True) if i else None)
+# Delete a course by ID.
 @app.post('/admin/courses/<int:i>/delete')
 @role('admin')
 def course_del(i): return delete('courses', i)
 
+# List examinations and their administrative actions.
 @app.route('/admin/exams')
 @role('admin')
 def exams():
@@ -180,6 +191,7 @@ def exams():
                       s('Open slot creation', 'Slot Creation'), s('Open booking', 'Booking Open'), s('Close', 'Closed'), s('Complete', 'Completed'),
                       A('Unpublish' if e['published'] else 'Publish results', url_for('exam_publish', i=e['id']), 'success'), A('Delete', url_for('exam_del', i=e['id']), 'danger')))
     return page('Examinations', [T('', ['ID', 'Name', 'Course', 'Type', 'Max', 'Status', 'Slot creation', 'Booking', 'Published'], rows)], top=[('Add examination', url_for('exam_edit', i=0))])
+# Create or edit an examination configuration.
 @app.route('/admin/exams/<int:i>/edit', methods=['GET', 'POST'])
 @role('admin')
 def exam_edit(i):
@@ -191,18 +203,22 @@ def exam_edit(i):
         if f['sc_start'] > f['sc_end'] or f['sb_start'] > f['sb_end']: return 'End date must not be before start date'
         if float(f['max_marks']) <= 0 or int(f['duration']) <= 0: return 'Marks and duration must be positive'
     return form('Examination', spec, url_for('exams'), 'exams', i, row=q('select * from exams where id=?', (i,), one=True) if i else None, check=check)
+# Delete an examination and its dependent records.
 @app.post('/admin/exams/<int:i>/delete')
 @role('admin')
 def exam_del(i): return delete('exams', i)
+# Change an examination lifecycle status.
 @app.post('/admin/exams/<int:i>/status/<s>')
 @role('admin')
 def exam_status(i, s):
     if s in STATUSES: x('update exams set status=? where id=?', (s, i)); flash(f'Status set to {s}', 'success')
     return redirect(url_for('exams'))
+# Toggle whether completed examination results are published.
 @app.post('/admin/exams/<int:i>/publish')
 @role('admin')
 def exam_publish(i):
     x('update exams set published=1-published where id=?', (i,)); return redirect(url_for('exams'))
+# List approved examiners and show their assignment status for an exam.
 @app.route('/admin/exams/<int:i>/examiners')
 @role('admin')
 def exam_examiners(i):
@@ -211,12 +227,14 @@ def exam_examiners(i):
         a = q('select 1 from exam_examiners where exam_id=? and examiner_id=?', (i, u['id']), one=True)
         rows.append(R([u['id'], u['name'], u['department'], 'Assigned' if a else '-'], A('Unassign' if a else 'Assign', url_for('exam_assign', i=i, u=u['id']), 'warning' if a else 'primary')))
     return page('Assign examiners', [T('', ['ID', 'Name', 'Department', 'Assigned'], rows)], top=[('Back', url_for('exams'))])
+# Toggle an examiner assignment for an examination.
 @app.post('/admin/exams/<int:i>/assign/<int:u>')
 @role('admin')
 def exam_assign(i, u):
     if q('select 1 from exam_examiners where exam_id=? and examiner_id=?', (i, u), one=True): x('delete from exam_examiners where exam_id=? and examiner_id=?', (i, u))
     else: x('insert into exam_examiners values(?,?)', (i, u))
     return redirect(url_for('exam_examiners', i=i))
+# List the rubric criteria for an examination.
 @app.route('/admin/exams/<int:e>/rubrics')
 @role('admin')
 def rubrics(e):
@@ -224,15 +242,18 @@ def rubrics(e):
     rows = [R([r['id'], r['name'], r['max_marks'], r['weightage'], r['description']], A('Edit', url_for('rubric_edit', e=e, i=r['id']), get=True), A('Delete', url_for('rubric_del', i=r['id']), 'danger')) for r in rs]
     return page(f'Rubrics (total max {sum(r["max_marks"] for r in rs)}, weightage {sum(r["weightage"] for r in rs)})', [T('', ['ID', 'Criterion', 'Max marks', 'Weightage', 'Description'], rows)],
                 top=[('Add criterion', url_for('rubric_edit', e=e, i=0)), ('Back', url_for('exams'))])
+# Create or edit a rubric criterion for an examination.
 @app.route('/admin/exams/<int:e>/rubrics/<int:i>/edit', methods=['GET', 'POST'])
 @role('admin')
 def rubric_edit(e, i):
     spec = [('name', 'Criterion name', 'text', None), ('max_marks', 'Maximum marks', 'number', None), ('weightage', 'Weightage (%)', 'number', None), ('description', 'Description', 'textarea', None)]
     return form('Rubric criterion', spec, url_for('rubrics', e=e), 'rubrics', i, row=q('select * from rubrics where id=?', (i,), one=True) if i else None, fixed={'exam_id': e})
+# Delete a rubric criterion.
 @app.post('/admin/rubrics/<int:i>/delete')
 @role('admin')
 def rubric_del(i): return delete('rubrics', i)
 
+# List examiners and provide approval or deactivation actions.
 @app.route('/admin/examiners')
 @role('admin')
 def admin_examiners():
@@ -241,11 +262,13 @@ def admin_examiners():
         act = [A('Deactivate', url_for('set_user', i=u['id'], s='inactive'), 'danger')] if u['status'] == 'approved' else [A('Approve', url_for('set_user', i=u['id'], s='approved'), 'success')]
         rows.append(R([u['id'], u['name'], u['email'], u['department'], u['phone'], u['status']], *act))
     return page('Examiners', [T('', ['ID', 'Name', 'Email', 'Department', 'Phone', 'Status'], rows)], top=[('Add examiner', url_for('add_examiner'))])
+# Approve or deactivate an examiner account.
 @app.post('/admin/users/<int:i>/<s>')
 @role('admin')
 def set_user(i, s):
     if s in ('approved', 'inactive'): x("update users set status=? where id=? and role='examiner'", (s, i))
     return redirect(url_for('admin_examiners'))
+# Add an examiner account directly as approved.
 @app.route('/admin/examiners/new', methods=['GET', 'POST'])
 @role('admin')
 def add_examiner():
@@ -254,17 +277,20 @@ def add_examiner():
         if err: flash(err, 'danger')
         else: return redirect(url_for('admin_examiners'))
     return rt('form.html', title='Add examiner', fields=F(UF))
+# List registered student accounts.
 @app.route('/admin/students')
 @role('admin')
 def admin_students():
     rows = [R([u['id'], u['name'], u['email'], u['ref_no'], u['department']]) for u in q("select * from users where role='student'")]
     return page('Students', [T('', ['ID', 'Name', 'Email', 'Student ID', 'Department'], rows)])
+# List all examination slots and their assigned examiners.
 @app.route('/admin/slots')
 @role('admin')
 def admin_slots():
     rows = [R([s['id'], s['ename'], s['xname'], s['date'], f"{s['start_time']}-{s['end_time']}", f"{s['capacity'] - s['available']}/{s['capacity']}", s['status']], A('Change examiner', url_for('change_examiner', i=s['id']), get=True))
             for s in q('select s.*, e.name ename, u.name xname from slots s join exams e on e.id=s.exam_id join users u on u.id=s.examiner_id order by date')]
     return page('All examination slots', [T('', ['ID', 'Exam', 'Examiner', 'Date', 'Time', 'Booked', 'Status'], rows)])
+# Reassign a slot to a different approved examiner.
 @app.route('/admin/slots/<int:i>/examiner', methods=['GET', 'POST'])
 @role('admin')
 def change_examiner(i):
@@ -277,12 +303,14 @@ def change_examiner(i):
     return rt('form.html', title='Change assigned examiner', fields=F(spec, s))
 BK = ("select b.*, u.name sname, u.ref_no, e.name ename, e.max_marks, e.published, e.sb_end, s.date, s.start_time, s.end_time, s.examiner_id, x.name xname "
       "from bookings b join users u on u.id=b.student_id join exams e on e.id=b.exam_id join slots s on s.id=b.slot_id join users x on x.id=s.examiner_id")
+# List every student booking and available rescheduling actions.
 @app.route('/admin/bookings')
 @role('admin')
 def admin_bookings():
     rows = [R([b['id'], b['sname'], b['ename'], b['xname'], b['date'], f"{b['start_time']}-{b['end_time']}", b['status'], b['marks']],
               *([A('Reschedule', url_for('reschedule', i=b['id']), get=True)] if b['status'] == 'Booked' else [])) for b in q(BK + ' order by b.id desc')]
     return page('All bookings', [T('', ['ID', 'Student', 'Exam', 'Examiner', 'Date', 'Time', 'Status', 'Marks'], rows)])
+# Move an active booking to another available slot.
 @app.route('/admin/bookings/<int:i>/reschedule', methods=['GET', 'POST'])
 @role('admin')
 def reschedule(i):
@@ -300,6 +328,7 @@ def reschedule(i):
     return rt('form.html', title='Reschedule booking', fields=F([('slot_id', 'New slot', 'select', opts)]))
 
 # ---------- examiner ----------
+# Display the examiner dashboard and assigned-exam summary.
 @app.route('/examiner')
 @role('examiner')
 def examiner_home():
@@ -310,6 +339,7 @@ def examiner_home():
     rows = [R([e['name'], e['type'], e['status'], f"{e['sc_start']} → {e['sc_end']}", 'Yes' if can_create(e) else 'No']) for e in
             q('select e.* from exams e join exam_examiners x on x.exam_id=e.id where x.examiner_id=?', (me,))]
     return page('Examiner Dashboard', [T('Assigned examinations', ['Exam', 'Type', 'Status', 'Slot creation window', 'Can create slots now'], rows)], cards, top=[('Create slot', url_for('slot_edit', i=0)), ('My slots', url_for('my_slots'))])
+# List slots created by the current examiner.
 @app.route('/examiner/slots')
 @role('examiner')
 def my_slots():
@@ -319,6 +349,7 @@ def my_slots():
         if s['est'] in ('Draft', 'Slot Creation'): act += [A('Edit', url_for('slot_edit', i=s['id']), get=True), A('Delete', url_for('slot_del', i=s['id']), 'danger')]
         rows.append(R([s['id'], s['ename'], s['date'], f"{s['start_time']}-{s['end_time']}", f"{s['capacity'] - s['available']}/{s['capacity']}", s['status']], *act))
     return page('My slots', [T('', ['ID', 'Exam', 'Date', 'Time', 'Booked', 'Status'], rows)], top=[('Create slot', url_for('slot_edit', i=0))])
+# Create or edit a slot for an assigned examination.
 @app.route('/examiner/slots/<int:i>/edit', methods=['GET', 'POST'])
 @role('examiner')
 def slot_edit(i):
@@ -347,6 +378,7 @@ def slot_edit(i):
             else: x('insert into slots(exam_id,examiner_id,date,start_time,end_time,capacity,available) values(?,?,?,?,?,?,?)', (eid, me, f['date'], f['start_time'], f['end_time'], cap, cap))
             flash('Slot saved', 'success'); return redirect(url_for('my_slots'))
     return rt('form.html', title='Examination slot', fields=F(spec, s))
+# Delete an examiner-owned slot before booking begins.
 @app.post('/examiner/slots/<int:i>/delete')
 @role('examiner')
 def slot_del(i):
@@ -354,6 +386,7 @@ def slot_del(i):
     if s['examiner_id'] != cur()['id']: abort(403)
     if s['est'] not in ('Draft', 'Slot Creation'): flash('Booking already started', 'warning'); return redirect(url_for('my_slots'))
     return delete('slots', i)
+# List students booked into a specific slot.
 @app.route('/examiner/slots/<int:i>/students')
 @role('examiner')
 def slot_students(i):
@@ -361,6 +394,7 @@ def slot_students(i):
     rows = [R([b['id'], b['sname'], b['ref_no'], b['status'], b['marks'], b['remarks']], *([A('Evaluate', url_for('evaluate', b=b['id']), 'primary', get=True)] if b['status'] != 'Cancelled' else []))
             for b in q(BK + ' where b.slot_id=?', (i,))]
     return page('Booked students', [T('', ['Booking', 'Student', 'Student ID', 'Status', 'Marks', 'Remarks'], rows)], top=[('Back', url_for('my_slots'))])
+# Evaluate a student booking using rubric or direct marks.
 @app.route('/examiner/evaluate/<int:b>', methods=['GET', 'POST'])
 @role('examiner')
 def evaluate(b):
@@ -397,6 +431,7 @@ def evaluate(b):
     return rt('form.html', title=f"Evaluate {bk['sname']} – {bk['ename']}", fields=fields)
 
 # ---------- student ----------
+# Display upcoming examinations and published results for the student.
 @app.route('/student')
 @role('student')
 def student_home():
@@ -408,6 +443,7 @@ def student_home():
              ('Upcoming', len(up)), ('Published results', len(res))]
     return page('Student Dashboard', [T('Upcoming / booked examinations', ['Exam', 'Date', 'Time', 'Examiner', 'Status'], up), T('Published results', ['Exam', 'Marks', 'Remarks'], res)],
                 cards, top=[('Browse exams', url_for('student_exams')), ('History', url_for('student_bookings')), ('Edit profile', url_for('profile'))])
+# Search and browse examinations available for booking.
 @app.route('/student/exams')
 @role('student')
 def student_exams():
@@ -415,6 +451,7 @@ def student_exams():
     rows = [R([e['name'], e['cname'], e['type'], e['duration'], e['max_marks'], e['status'], f"{e['sb_start']} → {e['sb_end']}"], A('View slots', url_for('student_exam', i=e['id']), 'primary', get=True))
             for e in q("select e.*, c.name cname from exams e join courses c on c.id=e.course_id where e.status!='Draft' and (e.name like ? or c.name like ? or c.code like ?) and (?='' or e.type=?)", (f'%{s}%',) * 3 + (t, t))]
     return page('Examinations', [T('', ['Exam', 'Course', 'Type', 'Mins', 'Max marks', 'Status', 'Booking window'], rows)], search=s, sel=('type', t, TYPES))
+# Show available slots for one examination.
 @app.route('/student/exams/<int:i>')
 @role('student')
 def student_exam(i):
@@ -423,6 +460,7 @@ def student_exam(i):
             for s in q('select s.*, u.name xname from slots s join users u on u.id=s.examiner_id where exam_id=? order by date', (i,))]
     if not can_book(e): flash('Booking is currently closed for this examination', 'warning')
     return page(e['name'] + ' – slots', [T('', ['Slot', 'Date', 'Time', 'Examiner', 'Free seats', 'Status'], rows)], top=[('Back', url_for('student_exams'))])
+# Create a student booking for an available slot.
 @app.post('/student/book/<int:sid>')
 @role('student')
 def book(sid):
@@ -436,6 +474,7 @@ def book(sid):
         x('insert into bookings(student_id,slot_id,exam_id,booked_at) values(?,?,?,?)', (me, sid, e['id'], today()))
         flash('Slot booked', 'success'); return redirect(url_for('student_bookings'))
     return redirect(url_for('student_exam', i=e['id']))
+# Show a student's booking history and published scorecards.
 @app.route('/student/bookings')
 @role('student')
 def student_bookings():
@@ -446,6 +485,7 @@ def student_bookings():
         rows.append(R([b['id'], ' ' + b['ename'], b['date'], f"{b['start_time']}-{b['end_time']}", b['xname'], b['booked_at'], b['status'],
                        f"{b['marks']}/{b['max_marks']}" if b['evaluated'] and b['published'] else '-', b['remarks'] if b['evaluated'] and b['published'] else ''], *act))
     return page('Booking history', [T('', ['ID', 'Exam', 'Date', 'Time', 'Examiner', 'Booked on', 'Status', 'Result', 'Feedback'], rows)])
+# Cancel an active student booking and restore slot capacity.
 @app.post('/student/cancel/<int:b>')
 @role('student')
 def cancel(b):
@@ -456,6 +496,7 @@ def cancel(b):
         x("update slots set available=available+1, status='Available' where id=? and status in ('Available','Full')", (bk['slot_id'],))
         flash('Booking cancelled', 'info')
     return redirect(url_for('student_bookings'))
+# Download a published scorecard as a text file.
 @app.route('/student/scorecard/<int:b>')
 @role('student')
 def scorecard(b):
@@ -466,6 +507,7 @@ def scorecard(b):
     return Response('\n'.join(lines), mimetype='text/plain', headers={'Content-Disposition': f'attachment; filename=scorecard_{b}.txt'})
 
 # ---------- JSON API (admin) ----------
+# Return a selected application collection as admin-only JSON.
 @app.route('/api/<what>')
 @role('admin')
 def api(what):
